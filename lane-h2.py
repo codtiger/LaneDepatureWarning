@@ -4,6 +4,25 @@ from scipy import signal
 from matplotlib import pyplot as plt
 import cv2
 import datetime
+import time
+
+
+def imshow(I):
+    # plt.imshow(I)
+    # plt.show()
+    # return
+    
+    #I = np.float32(I)
+    #I /= I.max()
+
+    
+    cv2.imshow('tools_imshow', I)
+    k = cv2.waitKey()
+    if k & 0xFF == ord('q'):
+        exit()
+    
+    
+    
 
 def get_threshold(I):
     w, h = I.shape
@@ -122,51 +141,97 @@ def draw_spline(I, points, color=(150, 0, 200)):
     I[y, x] = color
 
 
-cap = cv2.VideoCapture('/Users/apple/Downloads/Test Drive/testdrive15.mp4')
-print cap.isOpened()
+cap = cv2.VideoCapture('testdrive15.mp4')
+
 src_pts = np.array([(416, 576), (927, 576), (654, 426), (776, 426)]).astype(np.float32)
 dst_pts = np.array([(416, 500 * 1.5 - 200), (927, 500 * 1.5 - 200), (416, 426 * 1.0 - 350), (927, 426 * 1.0 - 350)]).astype(np.float32)
-open_element = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 35))
-close_element = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 17))
+src_pts = src_pts / 1.6
+dst_pts= dst_pts / 1.6
+open_element = cv2.getStructuringElement(cv2.MORPH_RECT, (4, 20))
+close_element = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 10))
 pmat = cv2.getPerspectiveTransform(src=src_pts, dst=dst_pts)
 ipmat = np.linalg.inv(pmat)
+
+l = []
+
+ds_rate = 2
+m = 1920
+n = 1080
+
+frame0 = np.zeros((m,n,3), dtype=np.uint8);
+
+m /= ds_rate
+n /= ds_rate
+
+gray = np.zeros((m,n), dtype=np.uint8);
+
+
+
 while cap.isOpened():
+    start1 = time.time() 
+
     _, frame = cap.read() # read grayscale, read certrain resoution
-    frame = cv2.resize(frame, (1280, 720)) # use NN, integer dowsample rate
-    # frame = frame[::2,::2]
-    cv2.imshow('orig', frame)
-    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    # frame[:,:,2] = cv2.equalizeHist(frame[:,:,2])
-    # frame = cv2.cvtColor(frame, cv2.COLOR_HSV2BGR)
-    frame2 = frame.copy() # why copy?
-    start = datetime.datetime.now() 
-    cv2.imshow('Frame', frame) 
-    frame = cv2.warpPerspective(src=frame, M=pmat, dsize=(1280, 700)) # dst=frame, use NN interpolation 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # put before warp
-    cv2.imshow('g', gray)    
-    #gray = cv2.equalizeHist(gray)
-    gray = cv2.GaussianBlur(gray, (13, 13), 0) 
-    sx = cv2.Sobel(gray, cv2.CV_32F, 2, 0, ksize = 5) # give dst as argument
+
+    
+
+    #frame = cv2.resize(frame, (800, 450), cv2.INTER_NEAREST) # use NN, integer dowsample rate
+    frame = frame[::ds_rate,::ds_rate]
+
+    
+    
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # check gray=frame[:,:,0]
+    
+    # cv2.imshow('Frame', frame)
+
+
+
+
+    
+
+
+    gray = cv2.warpPerspective(gray, M=pmat, dsize=(n,m), flags=cv2.INTER_NEAREST)
+
+    gray = cv2.GaussianBlur(gray, (9, 9), 0)
+    sx = cv2.Sobel(gray, cv2.CV_16S, 2, 0, ksize = 1) # give dst as argument
+
+    
+    
+    
+    
+    t0 = time.time()
+
+    
+    
+    
+    
+    l.append(time.time() - t0)
+    if len(l) == 100:
+        break
+    continue
+
+
+
     #cv2.Sobel(gray, cv2.CV_16S, 2, 0, ksize = 5,dst=sx)
     # sx = lineFilter(gray)
     sx = np.abs(sx) # use inplace abs
-    sx = sx/ sx.max() # sx = sx*255/max
+    #sx = sx/ sx.max() # sx = sx*255/max
     # see if max could be computed out of loop
-    cv2.imshow('normalized', sx)
+    # cv2.imshow('normalized', sx)
+
+    
     sx = cv2.morphologyEx(sx, cv2.MORPH_CLOSE, close_element)
     sx = cv2.morphologyEx(sx, cv2.MORPH_OPEN, open_element)
-    cv2.imshow('morpholo', sx)
-    C = sx.copy() # remove this
+    # cv2.imshow('morpholo', sx)
+    # C = sx.copy() # remove this
     sx = (sx * 255).astype(np.uint8) # not needed anymore
     thresh = get_threshold(sx) #?
     C[sx < thresh] = 0 # use cv2.threshold
-    cv2.imshow('C', C)    
-    end = datetime.datetime.now()
+    # cv2.imshow('C', C)    
+    end = time.time()
     print "the threshholding:{}".format((end-start).total_seconds())
     
-
-    s = C.sum(axis=0)
     
+    s = C.sum(axis=0)
     g = signal.gaussian(35, std=13)
     # g = np.ones(20)
     y = np.convolve(s, g / g.sum(), mode='valid') # use integer g*255/g.max()
@@ -181,6 +246,7 @@ while cap.isOpened():
     exth.append(y.shape[0])
     boundaries = []
     pts = [0., 0.]
+    start = time.time() 
     for i in range(1, len(exth)-1):
         l, r = find_boundaries(y, exth[i], exth[i-1], exth[i+1])
         l += 35/2
@@ -195,11 +261,13 @@ while cap.isOpened():
         draw_spline(img, dp)
         boundaries.append(l)
         boundaries.append(r)
+    end = time.time()
     print (end - start).total_seconds()
+    # print (end - start).total_seconds()
     for m in boundaries:
         cv2.line(img, (m, 1), (m, 700), (0, 0, 255), 2)
-    end = datetime.datetime.now()
-    cv2.imshow('Borders', img)
+    end = time.time()
+    # cv2.imshow('Borders', img)
     key = cv2.waitKey(33)    
     if key == ord(' '):
     	plt.plot(s)
@@ -208,3 +276,6 @@ while cap.isOpened():
     if key == ord('q'):
         break
         
+
+
+print np.array(l).mean()
