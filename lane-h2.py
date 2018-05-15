@@ -12,8 +12,8 @@ def imshow(I):
     # plt.show()
     # return
     
-    #I = np.float32(I)
-    #I /= I.max()
+    I = np.float32(I)
+    I /= I.max()
 
     
     cv2.imshow('tools_imshow', I)
@@ -25,20 +25,20 @@ def imshow(I):
     
 
 def get_threshold(I):
+    s = 3; # check different downsampling rates
+    I = I[::s,::s]
     w, h = I.shape
-    threshold = 0.05 * w * h
+    
     sum = w * h
-    hist, _ = np.histogram(I, 256)
-    cumhist=np.cumsum(hist)
-    if np.any(cumhist>sum-threshold):
-        return np.argmax(cumhist>sum-threshold)
-    else:
-        return 255
-    # for i in range(256):
-    #     if (sum-hist[i]) < threshold:
-    #         return i
-    #     sum -= hist[i]
-    # return 255
+    threshold = sum * 19 / 20
+    
+    hist, _ = np.histogram(I, 256) 
+    cumhist = np.cumsum(hist)
+    # check if we can directly get cumulative histogram
+
+    return np.searchsorted(cumhist, threshold)
+    
+    
 
 def find_boundaries(a, center, left, right):
     left_bound = center
@@ -55,7 +55,8 @@ def find_boundaries(a, center, left, right):
 def ransac(I):
     I = I.T
     w, h = I.shape
-    R = I.ravel() / I.sum()
+
+    R = I.ravel().astype(np.float32) / I.sum()
     iterations = 50 # move out
     angle_ratio = 0.5
     lenght_ratio = 0.3
@@ -143,37 +144,45 @@ def draw_spline(I, points, color=(150, 0, 200)):
 
 cap = cv2.VideoCapture('testdrive15.mp4')
 
+ds_rate = 2
+w = 1920
+h = 1080
+
+
+
+frame0 = np.zeros((w,h,3), dtype=np.uint8);
+
+w /= ds_rate
+h /= ds_rate
+
+gray = np.zeros((w,h), dtype=np.uint8);
+
+sc =  1280./w
+
+
+
+
+
 src_pts = np.array([(416, 576), (927, 576), (654, 426), (776, 426)]).astype(np.float32)
 dst_pts = np.array([(416, 500 * 1.5 - 200), (927, 500 * 1.5 - 200), (416, 426 * 1.0 - 350), (927, 426 * 1.0 - 350)]).astype(np.float32)
-src_pts = src_pts / 1.6
-dst_pts= dst_pts / 1.6
-open_element = cv2.getStructuringElement(cv2.MORPH_RECT, (4, 20))
-close_element = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 10))
+src_pts = src_pts / sc
+dst_pts= dst_pts / sc
+open_element = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 35))
+close_element = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 17))
 pmat = cv2.getPerspectiveTransform(src=src_pts, dst=dst_pts)
 ipmat = np.linalg.inv(pmat)
 
 l = []
 
-ds_rate = 2
-m = 1920
-n = 1080
-
-frame0 = np.zeros((m,n,3), dtype=np.uint8);
-
-m /= ds_rate
-n /= ds_rate
-
-gray = np.zeros((m,n), dtype=np.uint8);
 
 
-
+_, frame = cap.read()
 while cap.isOpened():
-    start1 = time.time() 
-
+    
+    
     _, frame = cap.read() # read grayscale, read certrain resoution
 
-    
-
+    start1 = time.time() 
     #frame = cv2.resize(frame, (800, 450), cv2.INTER_NEAREST) # use NN, integer dowsample rate
     frame = frame[::ds_rate,::ds_rate]
 
@@ -181,54 +190,48 @@ while cap.isOpened():
     
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # check gray=frame[:,:,0]
     
-    # cv2.imshow('Frame', frame)
+    cv2.imshow('Frame', frame)
 
 
-
-
-    
-
-
-    gray = cv2.warpPerspective(gray, M=pmat, dsize=(n,m), flags=cv2.INTER_NEAREST)
+    gray = cv2.warpPerspective(gray, M=pmat, dsize=(w,h), flags=cv2.INTER_NEAREST)
 
     gray = cv2.GaussianBlur(gray, (9, 9), 0)
     sx = cv2.Sobel(gray, cv2.CV_16S, 2, 0, ksize = 1) # give dst as argument
-
-    
-    
-    
-    
-    t0 = time.time()
-
-    
-    
-    
-    
-    l.append(time.time() - t0)
-    if len(l) == 100:
-        break
-    continue
-
-
-
-    #cv2.Sobel(gray, cv2.CV_16S, 2, 0, ksize = 5,dst=sx)
-    # sx = lineFilter(gray)
-    sx = np.abs(sx) # use inplace abs
-    #sx = sx/ sx.max() # sx = sx*255/max
-    # see if max could be computed out of loop
-    # cv2.imshow('normalized', sx)
-
+    sx = np.abs(sx)
+    sx = np.uint8(sx*255/sx.max())
+    cv2.imshow('sx',sx)
+    # try thresholing before morphology
+    # try input to morphology
+    # read opencv docs for morphology (binary vs grayscale input)
     
     sx = cv2.morphologyEx(sx, cv2.MORPH_CLOSE, close_element)
     sx = cv2.morphologyEx(sx, cv2.MORPH_OPEN, open_element)
-    # cv2.imshow('morpholo', sx)
-    # C = sx.copy() # remove this
-    sx = (sx * 255).astype(np.uint8) # not needed anymore
+
     thresh = get_threshold(sx) #?
-    C[sx < thresh] = 0 # use cv2.threshold
-    # cv2.imshow('C', C)    
+
+    _,C = cv2.threshold(sx, thresh, 255, cv2.THRESH_BINARY)
+
+    
+    # t0 = time.time()
+
+
+    
+    # l.append(time.time() - t0)
+    # if len(l) == 100:
+    #     break
+    # continue
+
+
     end = time.time()
-    print "the threshholding:{}".format((end-start).total_seconds())
+    print "the threshholding: ", end-start1
+
+        
+
+    
+    cv2.imshow('C', C)
+    
+
+
     
     
     s = C.sum(axis=0)
@@ -262,17 +265,17 @@ while cap.isOpened():
         boundaries.append(l)
         boundaries.append(r)
     end = time.time()
-    print (end - start).total_seconds()
+    print (end - start1)
     # print (end - start).total_seconds()
     for m in boundaries:
         cv2.line(img, (m, 1), (m, 700), (0, 0, 255), 2)
     end = time.time()
-    # cv2.imshow('Borders', img)
+    cv2.imshow('Borders', img)
     key = cv2.waitKey(33)    
-    if key == ord(' '):
-    	plt.plot(s)
-    	plt.plot(y)
-    	plt.show()
+#    if key == ord(' '):
+#        plt.plot(s)
+#        plt.plot(y)
+#        plt.show()
     if key == ord('q'):
         break
         
